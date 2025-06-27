@@ -4,6 +4,7 @@ import { Collection, Db } from "mongodb";
 import { connectMongo } from "../config/mongoConfig";
 import { Biodata, User } from "../models/user";
 import { SuiService } from "./suiService";
+import crypto from "crypto";
 
 export class UserService {
   private users?: Collection<User>;
@@ -28,64 +29,56 @@ export class UserService {
   async registerUser(
     email: string,
     password: string,
-    biodata: Biodata
+    biodata: Partial<Biodata>
   ): Promise<User> {
     if (!this.users) {
       throw new Error("UserService not initialized");
     }
 
-    // Validate inputs
     if (!email) throw new Error("Email is required");
     if (!password) throw new Error("Password is required");
     if (!/^[\w-.]+@([\w-]+\.)+[\w-]{2,4}$/.test(email))
       throw new Error("Invalid email format");
-    if (!biodata.personalInformation.firstName)
-      throw new Error("First name is required");
-    if (!biodata.personalInformation.lastName)
-      throw new Error("Last name is required");
-    if (!biodata.personalInformation.dob)
-      throw new Error("Date of birth is required");
-    if (!biodata.personalInformation.contactAddress)
-      throw new Error("Contact address is required");
-    if (!biodata.personalInformation.phoneNumber)
-      throw new Error("Phone number is required");
-    if (!biodata.personalInformation.emailAddress)
-      throw new Error("Email address is required");
 
     const existingUser = await this.users.findOne({ email });
     if (existingUser) throw new Error("Email already registered");
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
-    await this.suiService.registerUserOnChain(biodata);
+    const encryptionKey = crypto.randomBytes(32).toString("hex");
+
+    const validatedBiodata: Biodata = {
+      personalInformation: {
+        nationalId: biodata?.personalInformation?.nationalId || "",
+        firstName: biodata?.personalInformation?.firstName || "",
+        lastName: biodata?.personalInformation?.lastName || "",
+        dob: biodata?.personalInformation?.dob || "",
+        nationality: biodata?.personalInformation?.nationality || "",
+        contactAddress: biodata?.personalInformation?.contactAddress || "",
+        phoneNumber: biodata?.personalInformation?.phoneNumber || "",
+        emailAddress: biodata?.personalInformation?.emailAddress || "",
+        linkedinProfile: biodata?.personalInformation?.linkedinProfile || "",
+      },
+      educationalBackground: biodata?.educationalBackground || [],
+      workExperience: biodata?.workExperience || [],
+      skills: biodata?.skills || { technicalSkills: [], softSkills: [] },
+    };
+
+    await this.suiService.registerUserOnChain(validatedBiodata, encryptionKey);
 
     const now = new Date().toISOString();
     const user: User = {
-      id: "",
       email,
       password: hashedPassword,
-      biodata: {
-        professionalSummary: "",
-        personalInformation: {
-          nationalId: "",
-          firstName: "",
-          lastName: "",
-          dob: "",
-          nationality: "",
-          contactAddress: "",
-          phoneNumber: "",
-          emailAddress: "",
-          linkedinProfile: "",
-        },
-        educationalBackground: [],
-        workExperience: [],
-        skills: { technicalSkills: [], softSkills: [] },
-      },
+      biodata: validatedBiodata,
+      encryptionKey,
       createdAt: now,
       updatedAt: now,
     };
 
-    await this.users.insertOne(user);
+    const result = await this.users.insertOne(user);
+
+    user._id = result.insertedId;
 
     return user;
   }
@@ -101,7 +94,7 @@ export class UserService {
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) throw new Error("Invalid email or password");
 
-    const token = jwt.sign({ id: user.id }, process.env.JWT_SECRET || "", {
+    const token = jwt.sign({ id: user._id }, process.env.JWT_SECRET || "", {
       expiresIn: "1h",
     });
     return token;
@@ -119,16 +112,52 @@ export class UserService {
     if (!user) throw new Error("User not found");
 
     const updatedBiodata: Biodata = {
-      professionalSummary:
-        biodata.professionalSummary || user.biodata.professionalSummary,
       personalInformation: {
-        ...user.biodata.personalInformation,
-        ...(biodata.personalInformation || {}),
+        nationalId:
+          biodata?.personalInformation?.nationalId ||
+          user.biodata.personalInformation?.nationalId ||
+          "",
+        firstName:
+          biodata?.personalInformation?.firstName ||
+          user.biodata.personalInformation?.firstName ||
+          "",
+        lastName:
+          biodata?.personalInformation?.lastName ||
+          user.biodata.personalInformation?.lastName ||
+          "",
+        dob:
+          biodata?.personalInformation?.dob ||
+          user.biodata.personalInformation?.dob ||
+          "",
+        nationality:
+          biodata?.personalInformation?.nationality ||
+          user.biodata.personalInformation?.nationality ||
+          "",
+        contactAddress:
+          biodata?.personalInformation?.contactAddress ||
+          user.biodata.personalInformation?.contactAddress ||
+          "",
+        phoneNumber:
+          biodata?.personalInformation?.phoneNumber ||
+          user.biodata.personalInformation?.phoneNumber ||
+          "",
+        emailAddress:
+          biodata?.personalInformation?.emailAddress ||
+          user.biodata.personalInformation?.emailAddress ||
+          "",
+        linkedinProfile:
+          biodata?.personalInformation?.linkedinProfile ||
+          user.biodata.personalInformation?.linkedinProfile ||
+          "",
       },
       educationalBackground:
-        biodata.educationalBackground || user.biodata.educationalBackground,
-      workExperience: biodata.workExperience || user.biodata.workExperience,
-      skills: biodata.skills || user.biodata.skills,
+        biodata?.educationalBackground ||
+        user.biodata.educationalBackground ||
+        [],
+      workExperience:
+        biodata?.workExperience || user.biodata.workExperience || [],
+      skills: biodata?.skills ||
+        user.biodata.skills || { technicalSkills: [], softSkills: [] },
     };
 
     const updatedUser: User = {
@@ -150,13 +179,4 @@ export class UserService {
     }
     return await this.users.findOne({ id });
   }
-
-  // async getUserById(
-  //   nationalId: string
-  // ): Promise<{ uid: string; biodata: Biodata }> {
-  //   if (!this.users) {
-  //     throw new Error("UserService not initialized");
-  //   }
-  //   return await this.suiService.getUserByNinOnChain(nationalId);
-  //}
 }

@@ -1,15 +1,11 @@
 import express, { Express, Request, Response, NextFunction } from "express";
 import userRoutes from "./routes/userRoutes";
+import dotenv from "dotenv";
+dotenv.config();
 
 const app: Express = express();
 
 app.use(express.json());
-
-const asyncHandler =
-  (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) =>
-  (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
 
 app.use("/api/users", userRoutes);
 
